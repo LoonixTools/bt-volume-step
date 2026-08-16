@@ -1,0 +1,475 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Felitendo
+"""bt-volume-step - fixed volume steps for Bluetooth audio devices.
+
+Many Bluetooth devices carry a coarse internal volume grid. AirPods Pro, for
+example, expose only 16 AVRCP steps, so every swipe on the stem moves the
+volume by 6.25 %: 6, 13, 19, 25, 31 ... Pressing volume-up on a speaker has
+the same effect with whatever grid that speaker uses.
+
+This daemon watches for device-initiated volume changes, takes only their
+*direction* into account and applies a clean step of its own instead.
+
+It works because such devices adopt a volume written over AVRCP silently,
+without reporting it back, so there is no feedback loop. A device that does
+report back would make the volume oscillate; check for that before use by
+setting a volume and watching it for a few seconds.
+
+On KDE Plasma the step size is taken from the desktop's own setting (System
+Settings > Audio > "Volume step", stored as plasmaparc [General] VolumeStep).
+Changes there take effect immediately, without restarting the daemon.
+
+The *device* grid is measured per device: while it is unknown the daemon
+keeps its hands off. Only once the same jump has repeated several times is it
+accepted as the device step and remembered.
+"""
+
+import argparse
+import json
+import math
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+__version__ = "1.0.0"
+
+# ---------------------------------------------------------------- i18n
+
+def _detect_language():
+    for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(var)
+        if value:
+            return value.split(".")[0].split("_")[0].lower()
+    return "en"
+
+
+LANG = _detect_language()
+
+# English strings are the keys. To add a language, add another table and
+# extend TRANSLATIONS; untranslated strings fall back to English.
+TRANSLATIONS = {
+    "de": {
+        "Fixed volume steps for Bluetooth audio devices.":
+            "Feste Lautstärkeschritte für Bluetooth-Audiogeräte.",
+        "show measured device steps and exit":
+            "gemessene Gerätestufen anzeigen und beenden",
+        "discard calibration (without MAC: all devices)":
+            "Kalibrierung verwerfen (ohne MAC: alle Geräte)",
+        "step size from Plasma": "Schrittweite aus Plasma",
+        "step size fixed at {step:g} %": "Schrittweite fest auf {step:g} %",
+        ", device step fixed at {devstep:g} %":
+            ", Gerätestufe fest auf {devstep:g} %",
+        "step size: {step:g} %": "Schrittweite: {step:g} %",
+        "cannot read the Plasma step size ({error}), using {fallback:g} %":
+            "Plasma-Schrittweite nicht lesbar ({error}), nutze {fallback:g} %",
+        "pactl list sinks failed: {error}":
+            "pactl list sinks fehlgeschlagen: {error}",
+        "cannot save the calibration: {error}":
+            "Kalibrierung nicht speicherbar: {error}",
+        "known device steps:": "bekannte Gerätestufen:",
+        "watching {device} at {volume:.1f} %":
+            "beobachte {device} bei {volume:.1f} %",
+        "{device}: measured device step = {step:.2f} % ({count} steps) - active from now on":
+            "{device}: Gerätestufe gemessen = {step:.2f} % ({count} Stufen) – ab jetzt aktiv",
+        "{device}: {last:.1f} % -> device reported {cur:.1f} % -> set {target:.1f} %":
+            "{device}: {last:.1f} % -> Gerät meldete {cur:.1f} % -> gesetzt {target:.1f} %",
+        "file: {path}": "Datei: {path}",
+        "no device step measured yet": "noch keine Gerätestufe gemessen",
+        "{step:g} % ({count} steps)": "{step:g} % ({count} Stufen)",
+        "all calibrations discarded": "alle Kalibrierungen verworfen",
+        "calibration for {device} discarded":
+            "Kalibrierung für {device} verworfen",
+        "no calibration for {mac}": "keine Kalibrierung für {mac}",
+        "restart the service: systemctl --user restart bt-volume-step":
+            "Dienst neu starten: systemctl --user restart bt-volume-step",
+    },
+}
+
+_TABLE = TRANSLATIONS.get(LANG, {})
+
+
+def _(text):
+    """Translate a string into the current language, English as fallback."""
+    return _TABLE.get(text, text)
+
+
+# ---------------------------------------------------------------- settings
+
+MAC_FILTER = os.environ.get("BT_VOL_MAC", "")
+STEP_FIXED = os.environ.get("BT_VOL_STEP")
+DEVSTEP_FORCED = os.environ.get("BT_VOL_DEVSTEP")
+MAXV = float(os.environ.get("BT_VOL_MAX", "100"))
+
+NORM = 65536.0        # PA_VOLUME_NORM
+NOISE = 1.0           # % below this: rounding noise, or our own write
+# Higher values make foreign changes harder to tell apart: with a fine device
+# grid (32 steps = 3.125 %) an ordinary 10 % jump already reads as three
+# button presses.
+MAXMULT = 2           # device steps a single event may combine
+TOL_REL = 0.35        # share of the device step tolerated when matching
+STEP_TTL = 2.0        # s the Plasma step size is cached for
+STEP_FALLBACK = 5.0   # % Plasma's own default
+
+# --- measuring the device step ---
+DEV_MIN = 1.5         # % below this the device is fine-grained; leave it alone
+DEV_MAX = 20.0        # % above this it is not a volume button press
+# 0.12 covers the spread seen in practice: on AirPods Pro the jumps ranged
+# from 5.9 to 6.7 % around a step of 6.25 %.
+CLUSTER_REL = 0.12    # relative tolerance for two samples to count as equal
+NEED = 3              # matching samples required before locking the step
+SAMPLE_CAP = 12       # older samples expire
+
+STORE = (
+    Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    / "bt-volume-step" / "devsteps.json"
+)
+
+# C.UTF-8 rather than C: keeps pactl's messages English (we parse them)
+# without Qt tools such as kreadconfig6 complaining about a non-UTF-8 locale.
+ENV = {**os.environ, "LC_ALL": "C.UTF-8"}
+
+_step_cache = (0.0, None)  # (expires_at, value); None = never read
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def half_up(x):
+    """Round half away from zero instead of Python's round-half-to-even.
+
+    Otherwise snap(65, 10) would be 60 while snap(75, 10) is 80 - that is,
+    unpredictable for values sitting exactly between two grid points.
+    """
+    return math.floor(x + 0.5)
+
+
+# ---------------------------------------------------------------- Plasma
+
+def current_step():
+    """The step size from Plasma, briefly cached.
+
+    kreadconfig6 rather than parsing plasmaparc directly, so that KDE's
+    configuration cascade (/etc/xdg, locked-down settings) applies. On a
+    desktop without kreadconfig6 the fallback is Plasma's own default.
+    """
+    global _step_cache
+
+    if STEP_FIXED:
+        return float(STEP_FIXED)
+
+    expires, value = _step_cache
+    now = time.monotonic()
+    if now < expires:
+        return value
+
+    try:
+        out = subprocess.run(
+            ["kreadconfig6", "--file", "plasmaparc", "--group", "General",
+             "--key", "VolumeStep", "--default", str(STEP_FALLBACK)],
+            capture_output=True, text=True, env=ENV, timeout=5,
+        ).stdout.strip()
+        step = float(out)
+        if not 0 < step <= 100:
+            raise ValueError(f"implausible: {step}")
+    except (subprocess.SubprocessError, ValueError, OSError, FileNotFoundError) as exc:
+        log(_("cannot read the Plasma step size ({error}), using {fallback:g} %")
+            .format(error=exc, fallback=STEP_FALLBACK))
+        step = STEP_FALLBACK
+
+    if step != value:
+        log(_("step size: {step:g} %").format(step=step))
+    _step_cache = (now + STEP_TTL, step)
+    return step
+
+
+# ---------------------------------------------------------------- PipeWire
+
+def bt_sinks():
+    """All Bluetooth outputs as (sink_name, mac, percent, description)."""
+    try:
+        out = subprocess.run(
+            ["pactl", "-f", "json", "list", "sinks"],
+            capture_output=True, text=True, env=ENV, timeout=5,
+        ).stdout
+        sinks = json.loads(out)
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as exc:
+        log(_("pactl list sinks failed: {error}").format(error=exc))
+        return []
+
+    found = []
+    for sink in sinks:
+        name = sink.get("name", "")
+        if not name.startswith("bluez_output."):
+            continue
+        parts = name.split(".")
+        if len(parts) < 2:
+            continue
+        mac = parts[1]
+        if MAC_FILTER and mac != MAC_FILTER:
+            continue
+        values = [ch["value"] for ch in sink.get("volume", {}).values()]
+        if not values:
+            continue
+        description = (sink.get("description") or "").strip()
+        found.append((name, mac, max(values) / NORM * 100.0, description))
+    return found
+
+
+def set_volume(name, pct):
+    raw = int(round(pct / 100.0 * NORM))
+    subprocess.run(["pactl", "set-sink-volume", name, str(raw)], env=ENV, timeout=5)
+
+
+# ---------------------------------------------------------------- device names
+
+def paired_names():
+    """MAC (underscore form) -> name for every paired BlueZ device.
+
+    Used by --show, which also lists devices that are not connected right now
+    and therefore have no sink to read a description from.
+    """
+    try:
+        out = subprocess.run(
+            ["bluetoothctl", "devices"],
+            capture_output=True, text=True, env=ENV, timeout=5,
+        ).stdout
+    except (subprocess.SubprocessError, OSError):
+        return {}
+
+    names = {}
+    for line in out.splitlines():
+        parts = line.split(maxsplit=2)
+        if len(parts) == 3 and parts[0] == "Device":
+            names[parts[1].replace(":", "_")] = parts[2].strip()
+    return names
+
+
+def label(mac, name=None):
+    """Human-readable device label: 'Name (MAC)', or just the MAC."""
+    return f"{name} ({mac})" if name else mac
+
+
+# ---------------------------------------------------------------- calibration
+
+def load_store():
+    """Read the calibration store, tolerating the flat v1 format."""
+    try:
+        raw = json.loads(STORE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    store = {}
+    for mac, value in raw.items():
+        if isinstance(value, (int, float)):
+            store[mac] = {"step": float(value)}       # v1: bare number
+        elif isinstance(value, dict) and "step" in value:
+            store[mac] = value
+    return store
+
+
+def save_store(store):
+    try:
+        STORE.parent.mkdir(parents=True, exist_ok=True)
+        STORE.write_text(json.dumps(store, indent=2, sort_keys=True) + "\n")
+    except OSError as exc:
+        log(_("cannot save the calibration: {error}").format(error=exc))
+
+
+def calibrate(delta, samples, plasma_step):
+    """Record a sample; return the device step once it is certain, else None.
+
+    A volume button press on the device always produces the same jump. Deltas
+    that match the desktop's own step size most likely come from the keyboard
+    and are skipped - otherwise the daemon would calibrate itself onto them.
+    """
+    mag = abs(delta)
+    if not DEV_MIN <= mag <= DEV_MAX:
+        return None
+    if abs(mag - plasma_step) <= max(0.15, plasma_step * 0.02):
+        return None
+
+    samples.append(mag)
+    del samples[:-SAMPLE_CAP]
+
+    cluster = [s for s in samples if abs(s - mag) <= mag * CLUSTER_REL]
+    if len(cluster) < NEED:
+        return None
+    return sum(cluster) / len(cluster)
+
+
+# ---------------------------------------------------------------- decision
+
+def snap(pct, step):
+    """Round to the nearest multiple of the step size, clamped to 0..MAXV."""
+    return min(MAXV, max(0.0, half_up(pct / step) * step))
+
+
+def decide(last, cur, step, devstep):
+    """Target volume for an observed change last -> cur, or None.
+
+    A button press on the device always moves the volume by a multiple of the
+    device step. Only then do we intervene and replace the movement with our
+    own grid; anything else is a foreign, absolute change and is accepted.
+    """
+    delta = cur - last
+    if abs(delta) < NOISE:
+        return None
+
+    mult = half_up(abs(delta) / devstep)
+    if 1 <= mult <= MAXMULT and abs(abs(delta) - mult * devstep) <= devstep * TOL_REL:
+        direction = 1 if delta > 0 else -1
+        target = snap(last, step) + direction * mult * step
+    else:
+        target = snap(cur, step)
+    return min(MAXV, max(0.0, target))
+
+
+# ---------------------------------------------------------------- daemon
+
+def run():
+    store = load_store()
+
+    banner = (_("step size fixed at {step:g} %").format(step=float(STEP_FIXED))
+              if STEP_FIXED else _("step size from Plasma"))
+    if DEVSTEP_FORCED:
+        banner += _(", device step fixed at {devstep:g} %").format(
+            devstep=float(DEVSTEP_FORCED))
+    log(banner)
+    current_step()
+
+    if store:
+        log(_("known device steps:") + " " + ", ".join(
+            f"{label(mac, entry.get('name'))} = {entry['step']:g} %"
+            for mac, entry in sorted(store.items())))
+
+    state = {}  # mac -> {"last": float, "samples": [float]}
+
+    proc = subprocess.Popen(
+        ["pactl", "subscribe"],
+        stdout=subprocess.PIPE, text=True, env=ENV, bufsize=1,
+    )
+
+    for line in proc.stdout:
+        if "on sink #" not in line:
+            continue
+
+        plasma_step = current_step()
+        seen = set()
+
+        for sink_name, mac, cur, description in bt_sinks():
+            seen.add(mac)
+            entry = store.setdefault(mac, {})
+            if description and entry.get("name") != description:
+                entry["name"] = description
+                if "step" in entry:
+                    save_store(store)
+            device = label(mac, entry.get("name"))
+
+            st = state.setdefault(mac, {"last": None, "samples": []})
+            if st["last"] is None:
+                st["last"] = cur
+                log(_("watching {device} at {volume:.1f} %")
+                    .format(device=device, volume=cur))
+                continue
+
+            devstep = float(DEVSTEP_FORCED) if DEVSTEP_FORCED else entry.get("step")
+
+            if devstep is None:
+                # Not calibrated yet: let the change through, only measure.
+                delta = cur - st["last"]
+                if abs(delta) >= NOISE:
+                    found = calibrate(delta, st["samples"], plasma_step)
+                    if found:
+                        entry["step"] = round(found, 3)
+                        save_store(store)
+                        log(_("{device}: measured device step = {step:.2f} % "
+                              "({count} steps) - active from now on")
+                            .format(device=device, step=found,
+                                    count=round(100 / found)))
+                st["last"] = cur
+                continue
+
+            target = decide(st["last"], cur, plasma_step, devstep)
+            if target is None:
+                st["last"] = cur
+                continue
+
+            if abs(target - cur) >= 0.05:
+                set_volume(sink_name, target)
+                log(_("{device}: {last:.1f} % -> device reported {cur:.1f} % "
+                      "-> set {target:.1f} %")
+                    .format(device=device, last=st["last"], cur=cur, target=target))
+            st["last"] = target
+
+        # Forget disconnected devices so they are re-read on reconnect.
+        for mac in set(state) - seen:
+            del state[mac]
+
+    return proc.wait()
+
+
+# ---------------------------------------------------------------- CLI
+
+def cmd_show():
+    store = load_store()
+    names = paired_names()
+    print(_("file: {path}").format(path=STORE))
+    if not store:
+        print(_("no device step measured yet"))
+        return 0
+    for mac, entry in sorted(store.items()):
+        step = entry["step"]
+        name = entry.get("name") or names.get(mac)
+        print(f"  {label(mac, name)} = "
+              + _("{step:g} % ({count} steps)").format(
+                  step=step, count=round(100 / step)))
+    return 0
+
+
+def cmd_reset(target):
+    store = load_store()
+    if target == "*":
+        store = {}
+        print(_("all calibrations discarded"))
+    elif target in store:
+        name = store[target].get("name")
+        del store[target]
+        print(_("calibration for {device} discarded")
+              .format(device=label(target, name)))
+    else:
+        print(_("no calibration for {mac}").format(mac=target))
+        return 1
+    save_store(store)
+    print(_("restart the service: systemctl --user restart bt-volume-step"))
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        prog="bt-volume-step",
+        description=_("Fixed volume steps for Bluetooth audio devices."),
+    )
+    ap.add_argument("--show", action="store_true",
+                    help=_("show measured device steps and exit"))
+    ap.add_argument("--reset", metavar="MAC", nargs="?", const="*",
+                    help=_("discard calibration (without MAC: all devices)"))
+    ap.add_argument("--version", action="version",
+                    version=f"%(prog)s {__version__}")
+    args = ap.parse_args(argv)
+
+    if args.show:
+        return cmd_show()
+    if args.reset:
+        return cmd_reset(args.reset)
+    return run()
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        pass

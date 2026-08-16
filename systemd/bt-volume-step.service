@@ -1,0 +1,14 @@
+[Unit]
+Description=Fixed volume steps for Bluetooth audio devices
+Documentation=https://github.com/Felitendo/bt-volume-step
+After=pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bt-volume-step
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
