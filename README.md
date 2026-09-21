@@ -15,7 +15,7 @@ only 16 AVRCP steps, so every swipe on the stem moves the system volume by
 instead of clean multiples of five. A speaker's volume buttons do the same
 thing with whatever grid that speaker happens to use.
 
-This is not a desktop misconfiguration — KDE's own volume step is already
+This is not a desktop misconfiguration. KDE's own volume step is already
 exactly 5 %. The grid lives in the device firmware, and it cannot be changed:
 the device sends *absolute* volume values over AVRCP, not increments.
 
@@ -68,7 +68,7 @@ control.
 ## Calibration
 
 The daemon measures each device's grid on its own. **While a device's grid is
-unknown it does not intervene at all** — it only watches. Once the same jump
+unknown it does not intervene at all**, it only watches. Once the same jump
 has repeated three times, that jump is accepted as the device step and
 remembered, and corrections start from then on. In practice: press volume-up
 three or four times on a new device and it is set up.
@@ -104,7 +104,7 @@ configuration cascade applies). Changes take effect within two seconds, with
 no restart. On other desktops, or without `kreadconfig6`, it falls back to
 5 %.
 
-Everything can be overridden through the environment — put these in a drop-in
+Everything can be overridden through the environment. Put these in a drop-in
 (`systemctl --user edit bt-volume-step`):
 
 | Variable | Effect |
@@ -121,7 +121,7 @@ and calibration per device.
 
 Messages follow `LC_ALL` / `LC_MESSAGES` / `LANG`. English and German are
 included; other languages fall back to English. To add one, extend
-`TRANSLATIONS` in the script — English strings are the keys.
+`TRANSLATIONS` in the script. English strings are the keys.
 
 ## Limitations
 

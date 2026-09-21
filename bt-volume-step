@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026, Felitendo
-"""bt-volume-step - fixed volume steps for Bluetooth audio devices.
+"""bt-volume-step: fixed volume steps for Bluetooth audio devices.
 
 Many Bluetooth devices carry a coarse internal volume grid. AirPods Pro, for
 example, expose only 16 AVRCP steps, so every swipe on the stem moves the
@@ -72,8 +72,8 @@ TRANSLATIONS = {
         "known device steps:": "bekannte Gerätestufen:",
         "watching {device} at {volume:.1f} %":
             "beobachte {device} bei {volume:.1f} %",
-        "{device}: measured device step = {step:.2f} % ({count} steps) - active from now on":
-            "{device}: Gerätestufe gemessen = {step:.2f} % ({count} Stufen) – ab jetzt aktiv",
+        "{device}: measured device step = {step:.2f} % ({count} steps), active from now on":
+            "{device}: Gerätestufe gemessen = {step:.2f} % ({count} Stufen), ab jetzt aktiv",
         "{device}: {last:.1f} % -> device reported {cur:.1f} % -> set {target:.1f} %":
             "{device}: {last:.1f} % -> Gerät meldete {cur:.1f} % -> gesetzt {target:.1f} %",
         "file: {path}": "Datei: {path}",
@@ -141,7 +141,7 @@ def log(msg):
 def half_up(x):
     """Round half away from zero instead of Python's round-half-to-even.
 
-    Otherwise snap(65, 10) would be 60 while snap(75, 10) is 80 - that is,
+    Otherwise snap(65, 10) would be 60 while snap(75, 10) is 80. That is
     unpredictable for values sitting exactly between two grid points.
     """
     return math.floor(x + 0.5)
@@ -284,7 +284,7 @@ def calibrate(delta, samples, plasma_step):
 
     A volume button press on the device always produces the same jump. Deltas
     that match the desktop's own step size most likely come from the keyboard
-    and are skipped - otherwise the daemon would calibrate itself onto them.
+    and are skipped. Otherwise the daemon would calibrate itself onto them.
     """
     mag = abs(delta)
     if not DEV_MIN <= mag <= DEV_MAX:
@@ -387,7 +387,7 @@ def run():
                         entry["step"] = round(found, 3)
                         save_store(store)
                         log(_("{device}: measured device step = {step:.2f} % "
-                              "({count} steps) - active from now on")
+                              "({count} steps), active from now on")
                             .format(device=device, step=found,
                                     count=round(100 / found)))
                 st["last"] = cur
