@@ -1,6 +1,20 @@
-# bt-volume-step
+<p align="center">
+  <img width="200" src="res/bt-volume-step.svg" alt="bt-volume-step">
+</p>
 
-Fixed volume steps for Bluetooth audio devices on PipeWire.
+<h1 align="center">bt-volume-step</h1>
+
+<h3 align="center">Fixed volume steps for Bluetooth audio devices on PipeWire.</h3>
+
+<p align="center">
+  One press or swipe on your earbuds or speaker becomes one clean step on your volume slider.
+</p>
+
+<h5 align="center">
+  <a href="#usage">How to use</a> |
+  <a href="#installation">Install</a> |
+  <a href="https://ko-fi.com/felitendo">Ko-Fi</a>
+</h5>
 
 ## The problem
 

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="13.0 67.5 486.1 486.1" width="512" height="512">
+  <defs>
+    <linearGradient id="bo-cup" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5fd0ff"/><stop offset="1" stop-color="#0c62a0"/></linearGradient>
+    <linearGradient id="bo-bar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5fd0ff"/><stop offset="1" stop-color="#1383bd"/></linearGradient>
+    <linearGradient id="bo-band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9bcd0"/><stop offset="1" stop-color="#56697e"/></linearGradient>
+    <linearGradient id="bo-pad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1f2c3b"/><stop offset="1" stop-color="#3a4b5e"/></linearGradient>
+    <linearGradient id="bo-paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dfe7f0"/></linearGradient>
+    <filter id="bo-soft" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#04213a" flood-opacity=".35"/></filter>
+  </defs>
+  <g filter="url(#bo-soft)">
+    <!-- headband -->
+    <path d="M118 292 C 118 150, 394 150, 394 292" fill="none" stroke="url(#bo-band)" stroke-width="36" stroke-linecap="round"/>
+    
+    
+    
+    <!-- ear pads, facing inwards -->
+    <rect x="150" y="286" width="40" height="132" rx="20" fill="url(#bo-pad)"/>
+    <rect x="322" y="286" width="40" height="132" rx="20" fill="url(#bo-pad)"/>
+    <!-- cups -->
+    <rect x="66" y="270" width="104" height="164" rx="46" fill="url(#bo-cup)"/>
+    <rect x="342" y="270" width="104" height="164" rx="46" fill="url(#bo-cup)"/>
+    <path d="M88 312 C 88 298, 94 288, 106 284" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="7" stroke-linecap="round"/>
+    <path d="M364 312 C 364 298, 370 288, 382 284" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="7" stroke-linecap="round"/>
+    <path d="M98.8 337.6 L135.6 366.4 L118.0 380.8 L118.0 323.2 L135.6 337.6 L98.8 366.4" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- fixed steps -->
+    <rect x="212" y="366" width="24" height="44" rx="8" fill="url(#bo-bar)"/>
+    <rect x="244" y="340" width="24" height="70" rx="8" fill="url(#bo-bar)"/>
+    <rect x="276" y="314" width="24" height="96" rx="8" fill="url(#bo-bar)"/>
+  </g>
+</svg>
