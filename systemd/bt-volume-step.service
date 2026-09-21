@@ -1,6 +1,6 @@
 [Unit]
 Description=Fixed volume steps for Bluetooth audio devices
-Documentation=https://github.com/Felitendo/bt-volume-step
+Documentation=https://github.com/LoonixTools/bt-volume-step
 After=pipewire-pulse.service
 Wants=pipewire-pulse.service
 
