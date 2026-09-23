@@ -13,8 +13,12 @@
 <h5 align="center">
   <a href="#usage">How to use</a> |
   <a href="#installation">Install</a> |
-  <a href="https://buymeacoffee.com/felitendo">☕ Buy Me a Coffee</a>
+  <a href="https://github.com/LoonixTools/bt-volume-step/issues">Report a bug</a>
 </h5>
+
+<p align="center">
+  <a href="https://buymeacoffee.com/felitendo"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="48"></a>
+</p>
 
 ## The problem
 
