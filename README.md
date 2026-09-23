@@ -13,7 +13,7 @@
 <h5 align="center">
   <a href="#usage">How to use</a> |
   <a href="#installation">Install</a> |
-  <a href="https://ko-fi.com/felitendo">Ko-Fi</a>
+  <a href="https://buymeacoffee.com/felitendo">☕ Buy Me a Coffee</a>
 </h5>
 
 ## The problem
