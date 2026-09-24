@@ -6,6 +6,12 @@
 - Avoid em dashes (—). Do not just swap them for "-" either. Rewrite the sentence instead, for
   example with a comma, a colon, brackets or two sentences.
 
+## Commits
+
+- Do not commit or push before I have checked the changes locally and said they are fine. Then
+  commit the result once and push. No commits for attempts that did not work. This also goes for
+  releases and tags.
+
 ## Releases
 
 Releases look like the ones of big projects such as Immich. `.github/release-notes.sh <tag>` builds
