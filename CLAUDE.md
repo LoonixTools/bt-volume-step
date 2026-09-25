@@ -9,7 +9,8 @@
 ## Commits
 
 - Do not commit or push before I have checked the changes locally and said they are fine. Then
-  commit the result once and push. No commits for attempts that did not work. This also goes for
+  commit and push. Several attempts at the same thing make one commit, and attempts that did not
+  work make none. Different things done in one session get a commit each. This also goes for
   releases and tags.
 
 ## Releases
